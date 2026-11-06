@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MP4 в MP3</title>
+<style>
+:root{--bg:#f4f5f8;--fg:#1c2230;--mut:#6b7385;--ac:#3b6cf6;--bar:#dde1ea;--ok:#1e8a52;--err:#c0352b;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#10131a;--fg:#eceff6;--mut:#8f98ad;--ac:#6b93ff;--bar:#2a3040;--ok:#55d08d;--err:#ff8479;color-scheme:dark}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);color:var(--fg);font:17px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{width:100%;max-width:420px;padding:24px 20px;text-align:center}
+h1{font-size:2rem;margin:0 0 8px}
+p{color:var(--mut);margin:0 0 28px}
+.btn{display:block;width:100%;border:0;border-radius:16px;padding:20px;background:var(--ac);color:#fff;font:700 1.2rem system-ui,sans-serif;cursor:pointer}
+.btn.off{opacity:.5;pointer-events:none}
+input{display:none}
+.bar{height:10px;border-radius:5px;background:var(--bar);overflow:hidden;margin-top:22px;display:none}
+.bar i{display:block;height:100%;width:0;background:var(--ac);transition:width .2s}
+#msg{margin-top:14px;min-height:26px}
+#msg.ok{color:var(--ok);font-weight:600}
+#msg.err{color:var(--err);font-weight:600}
+a{display:none;margin-top:10px;color:var(--ac);font-weight:600}
+</style>
+</head>
+<body>
+<main>
+<h1>MP4 в MP3</h1>
+<p>Выбери видео, и MP3 скачается сам. Файл никуда не отправляется.</p>
+<label class="btn" id="btn" for="file">Выбрать видео</label>
+<input type="file" id="file" accept="video/*,audio/*">
+<div class="bar" id="bar"><i id="prog"></i></div>
+<div id="msg"></div>
+<a id="dl">Скачать ещё раз</a>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
+<script>
+(function(){
+var $=function(i){return document.getElementById(i)},busy=false,url=null;
+function msg(t,c){$('msg').textContent=t;$('msg').className=c||''}
+function prog(p){$('bar').style.display='block';$('prog').style.width=Math.round(p*100)+'%'}
+function tick(){return new Promise(function(r){setTimeout(r,0)})}
+function i16(f){var o=new Int16Array(f.length);for(var i=0;i<f.length;i++){var s=Math.max(-1,Math.min(1,f[i]));o[i]=s<0?s*32768:s*32767}return o}
+function readFile(f){
+  return new Promise(function(res,rej){
+    var r=new FileReader();
+    r.onprogress=function(e){if(e.lengthComputable){var p=e.loaded/e.total;prog(p*0.2);msg('Загрузка файла… '+Math.round(p*100)+'%')}};
+    r.onload=function(){res(r.result)};
+    r.onerror=function(){rej(new Error('Не удалось прочитать файл'))};
+    r.readAsArrayBuffer(f);
+  });
+}
+$('file').addEventListener('change',async function(e){
+  var f=e.target.files[0];e.target.value='';
+  if(!f||busy)return;
+  busy=true;$('btn').classList.add('off');$('dl').style.display='none';
+  try{
+    if(typeof lamejs==='undefined')throw new Error('Не загрузился кодировщик. Проверь интернет и обнови страницу.');
+    prog(0);
+    var buf=await readFile(f);
+    msg('Достаю звук…');prog(0.25);await tick();
+    var Ctx=window.AudioContext||window.webkitAudioContext,ctx=new Ctx(),ab;
+    try{ab=await ctx.decodeAudioData(buf)}
+    catch(x){throw new Error('Не удалось достать звук. В видео нет звука или формат не поддерживается.')}
+    try{ctx.close()}catch(x){}
+    var ch=Math.min(ab.numberOfChannels,2),enc=new lamejs.Mp3Encoder(ch,ab.sampleRate,192);
+    var L=i16(ab.getChannelData(0)),R=ch>1?i16(ab.getChannelData(1)):null,parts=[],blk=1152*40,tot=L.length;
+    for(var i=0;i<tot;i+=blk){
+      var d=R?enc.encodeBuffer(L.subarray(i,i+blk),R.subarray(i,i+blk)):enc.encodeBuffer(L.subarray(i,i+blk));
+      if(d.length)parts.push(new Uint8Array(d));
+      prog(0.3+0.7*i/tot);msg('Конвертирую… '+Math.round(i/tot*100)+'%');await tick();
+    }
+    var end=enc.flush();if(end.length)parts.push(new Uint8Array(end));
+    var blob=new Blob(parts,{type:'audio/mpeg'});
+    if(url)URL.revokeObjectURL(url);
+    url=URL.createObjectURL(blob);
+    var name=(f.name.replace(/\.[^.]+$/,'')||'audio')+'.mp3';
+    $('dl').href=url;$('dl').download=name;
+    prog(1);msg('Готово: '+name,'ok');
+    $('dl').style.display='inline-block';
+    $('dl').click();
+  }catch(x){
+    msg(x.message||'Что-то пошло не так','err');$('bar').style.display='none';
+  }
+  busy=false;$('btn').classList.remove('off');
+});
+})();
+</script>
+</body>
+</html>
